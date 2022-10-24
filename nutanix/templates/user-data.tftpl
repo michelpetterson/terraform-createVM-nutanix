@@ -1,0 +1,713 @@
+#cloud-config
+
+preserve_hostname: false
+
+apt_preserve_sources_list: false
+
+hostname: ${hostname}
+
+cloud_init_modules:
+ - migrator
+ - bootcmd
+ - write-files
+ - mounts
+ - set_hostname
+ - update_hostname
+ - update_etc_hosts
+ - ca-certs
+ - rsyslog
+ - users-groups
+ - ssh
+
+cloud_config_modules:
+ - ssh-import-id
+ - locale
+ - set-passwords
+ - grub-dpkg
+ - apt-pipelining
+ - apt-configure
+ - disable-ec2-metadata
+ - ntp
+ - timezone
+ - runcmd
+
+cloud_final_modules:
+ - package-update-upgrade-install
+ - fan
+ - rightscale_userdata
+ - scripts-vendor
+ - scripts-per-once
+ - scripts-per-boot
+ - scripts-per-instance
+ - scripts-user
+ - ssh-authkey-fingerprints
+ - keys-to-console
+ - final-message
+ - power-state-change
+
+#debug:
+#   verbose: (defaulting to true)
+#   output: (location to write output, defaulting to console + log)
+
+users:
+  - name: ${user}
+    primary_group: terraform
+    groups: terraform
+    shell: /bin/sh
+
+chpasswd:
+  expire: False
+  list: |
+     ${user}:${pass}
+  
+groups:
+  - terraform: ["${user}"]
+
+system_info:
+   distro: debian
+   paths:
+      cloud_dir: /var/lib/cloud/
+      templates_dir: /etc/cloud/templates/
+      upstart_dir: /etc/init/
+   ssh_svcname: ssh
+
+manage_etc_hosts: True
+manage-resolv-conf: True
+
+package_update: True
+package_upgrade: True
+
+apt:
+  primary:
+    - arches:
+        - amd64
+      uri: http://deb.debian.org
+  sources_list: |
+      deb $MIRROR/debian $RELEASE main contrib non-free
+      deb-src $MIRROR/debian $RELEASE main contrib non-free
+
+      deb $MIRROR/debian-security/ $RELEASE/updates main contrib non-free
+      deb-src $MIRROR/debian-security/ $RELEASE/updates main contrib non-free
+
+  conf: |
+      APT {
+          Get {
+              Assume-Yes 'true';
+              Fix-Broken 'true';
+          }
+      }
+
+packages:
+  - wget
+  - vim
+  - locate
+  - net-tools
+  - sudo
+  - libpam-ldapd
+  - postfix
+  - rcconf
+  - openssh-server
+  - apticron
+  - zabbix-agent
+  - aide
+  - auditd
+  - snoopy
+  - chkrootkit
+  - etckeeper
+  - git-core
+  - chkrootkit
+  - man
+  - ntp
+  - molly-guard
+  - open-vm-tools
+  - less
+  - lvm2
+  - ncat
+
+write_files:
+  - path: /etc/motd
+    content: |
+       *******************************************************************************
+       Este servidor pertence a Universidade Federal da Bahia. Caso seu acesso seja
+       ilicito, voce estara sujeito as penalidades previstas em Lei. Para relatos de
+       problemas relacionados a seguranca na Rede __EMPRESA__, envie um email para
+       seguranca@listas.domain.com.
+
+
+       A T E N C A O: ao alterar arquivos no /etc, atualize o etckeeper!
+       ==============
+
+       # cd /etc
+       # git commit <arq1 ...> -m "mensagem explicando" --author="Nome <email>"
+
+       Mais informacoes:
+       _NOME_DO_SITE_
+
+       *******************************************************************************
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/ssh/sshd_config
+    content: |
+      Protocol 2
+      Port 2131
+      UsePAM yes
+      StrictModes yes
+      LoginGraceTime 120
+      X11Forwarding no
+      PrintMotd no
+      AcceptEnv LANG LC_*
+      AllowGroups cpd-disup-ssh cpd-operadores terraform
+      Subsystem       sftp    /usr/lib/openssh/sftp-server
+      HostKey /etc/ssh/ssh_host_rsa_key
+      HostKey /etc/ssh/ssh_host_dsa_key
+      HostKey /etc/ssh/ssh_host_ecdsa_key
+      HostKey /etc/ssh/ssh_host_ed25519_key
+      PrintLastLog yes
+      SyslogFacility AUTH
+      LogLevel INFO
+      PermitRootLogin no
+      PermitEmptyPasswords no
+      ChallengeResponseAuthentication no
+      PubkeyAuthentication yes
+      HostbasedAuthentication no
+      IgnoreRhosts yes
+      TCPKeepAlive yes
+    owner: root:root
+    permissions: '0600'
+
+  - path: /etc/postfix/main.cf
+    content: |
+      smtpd_banner = $myhostname ESMTP $mail_name (Debian/GNU)
+      biff = no
+      append_dot_mydomain = no
+      readme_directory = no
+      smtpd_tls_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      smtpd_tls_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+      smtpd_use_tls=yes
+      smtpd_tls_session_cache_database = btree:$data_directory/smtpd_scache
+      smtp_tls_session_cache_database = btree:$data_directory/smtp_scache
+      smtpd_relay_restrictions = permit_mynetworks permit_sasl_authenticated defer_unauth_destination
+      masquerade_domains = domain.com
+      alias_maps = hash:/etc/aliases
+      alias_database = hash:/etc/aliases
+      mydestination = /etc/mailname, localhost, $myhostname
+      relayhost = smtp2.domain.com
+      mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
+      mailbox_command = procmail -a "$EXTENSION"
+      mailbox_size_limit = 0
+      recipient_delimiter = +
+      inet_interfaces = loopback-only
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/issue
+    content: |
+
+      Bem-vindo ao Linux Server.
+
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/sudoers.d/01_sudoers_empresa
+    content: |
+      %cpd-disup-ssh ALL=NOPASSWD: ALL
+    owner: root:root
+    permissions: '0440'
+
+  - path: /usr/share/pam-configs/mkhomedir
+    content: |
+      Name: Create home directory during user
+      Default: yes
+      Priority: 900
+      Session-Type: Additional
+      Session:
+      required pam_mkhomedir.so umask=0022 skel=/etc/skel
+    owner: root:root
+    permissions: '0644'
+
+  - path: /tmp/preconfs.seed
+    content: |
+      ##### NSLCD #####
+      nslcd   nslcd/ldap-uris string  ldap://ldap.intranet.domain.com/
+      nslcd   nslcd/ldap-base string  dc=intranet,dc=domain,dc=com
+      ##### LIBNSS-LDAP #####
+      libnss-ldapd    libnss-ldapd/nsswitch   multiselect
+      libnss-ldapd:amd64      libnss-ldapd/nsswitch   multiselect
+      ##### SNOOPY ######
+      snoopy  snoopy/install-ld-preload       boolean true
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/aliases
+    content: |
+      mailer-daemon: postmaster
+      postmaster: root
+      nobody: root
+      hostmaster: root
+      usenet: root
+      news: root
+      webmaster: root
+      www: root
+      ftp: root
+      abuse: root
+      noc: root
+      security: root
+      root: monitor@listas.domain.com
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/user.defs
+    content: |
+      MAIL_DIR        /var/mail
+      FAILLOG_ENAB            yes
+      LOG_UNKFAIL_ENAB        yes
+      LOG_OK_LOGINS           yes
+      SYSLOG_SU_ENAB          yes
+      SYSLOG_SG_ENAB          yes
+      FTMP_FILE       /var/log/btmp
+      SU_NAME         su
+      HUSHLOGIN_FILE  .hushlogin
+      ENV_SUPATH      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      ENV_PATH        PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
+      TTYGROUP        tty
+      TTYPERM         0600
+      ERASECHAR       0177
+      KILLCHAR        025
+      UMASK           022
+      PASS_MAX_DAYS   99999
+      PASS_MIN_DAYS   0
+      PASS_WARN_AGE   7
+      UID_MIN                  1000
+      UID_MAX                 60000
+      GID_MIN                  1000
+      GID_MAX                 60000
+      LOGIN_RETRIES           5
+      LOGIN_TIMEOUT           60
+      CHFN_RESTRICT           rwh
+      DEFAULT_HOME    yes
+      USERGROUPS_ENAB yes
+      ENCRYPT_METHOD SHA512
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/profile.d/domain-profile.sh
+    content: |
+      # domain profile
+      export TMOUT=600
+    owner: root:root
+    permissions: '0644'
+
+  - path: /root/.bashrc
+    content: |
+      umask 022
+      export LS_OPTIONS='--color=auto'
+      eval "`dircolors`"
+      alias ls='ls $LS_OPTIONS'
+      alias ll='ls $LS_OPTIONS -l'
+      alias l='ls $LS_OPTIONS -lA'
+      alias grep='grep --color=auto'
+      alias fgrep='fgrep --color=auto'
+      alias egrep='egrep --color=auto'
+      alias rm='rm -i'
+      alias cp='cp -i'
+      alias mv='mv -i'
+      if ! shopt -oq posix; then
+        if [ -f /usr/share/bash-completion/bash_completion ]; then
+          . /usr/share/bash-completion/bash_completion
+        elif [ -f /etc/bash_completion ]; then
+          . /etc/bash_completion
+        fi
+      fi
+      function etckeeper_on_logout {
+         # check for uncommited changes on /etc
+         cd /etc
+         if which etckeeper >/dev/null && etckeeper unclean; then
+            git status
+            echo -n -e "Uncommited changes on /etc. Exit anyway? (y/N)"
+            read ANSWER
+            if [ "$ANSWER" != "y" ]; then
+               echo ""
+               echo "Procedimento do etckeeper:"
+               echo "   https://wiki.domain.com/CRI/PRD-CRI-023"
+               echo ""
+               /bin/bash
+            fi
+         fi
+      }
+      trap etckeeper_on_logout EXIT
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/skel/.bash_logout
+    content: |
+      # ~/.bash_logout: executed by bash(1) when user shell exits.
+      # # when leaving the console clear the screen to increase privacy
+      if [ "$SHLVL" = 1 ]; then
+         [ -x /usr/bin/clear_console ] && /usr/bin/clear_console -q
+      fi
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/nslcd.conf
+    content: |
+      uid nslcd
+      gid nslcd
+      uri ldap://ldap.intranet.domain.com
+      base   group ou=Grupos,dc=intranet,dc=domain,dc=com
+      base ou=2396,dc=intranet,dc=domain,dc=com
+      ldap_version 3
+      binddn linuxldap-ro@intranet.domain.com
+      bindpw passw0rd
+      referrals off
+      scope sub
+      map passwd uid sAMAccountName
+      filter passwd (objectclass=user)
+      map shadow uid sAMAccountName
+      filter shadow (objectclass=user)
+      map passwd homeDirectory msSFUHomeDirectory
+      filter group  (&(objectClass=group)(gidNumber=*))
+    owner: root:root
+    permissions: '0640'
+
+  - path: /etc/nsswitch.conf
+    content: |
+      passwd:         compat ldap
+      group:          compat ldap
+      shadow:         compat ldap
+      gshadow:        files
+      hosts:          files dns
+      networks:       files
+      protocols:      db files
+      invoke-rc.ds:       db files
+      ethers:         db files
+      rpc:            db files
+      netgroup:       nis
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/sysctl.d/50-domain-sysctl.conf
+    content: |
+      net.ipv4.conf.default.promote_secondaries = 1
+      net.ipv4.conf.all.promote_secondaries = 1
+      net.ipv4.conf.all.rp_filter = 1
+      fs.inotify.max_user_watches = 65536
+      net.ipv4.tcp_syncookies = 1
+      net.ipv4.tcp_max_syn_backlog = 2048
+      net.ipv4.tcp_synack_retries = 3
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv4.conf.all.log_martians = 1
+      kernel.dmesg_restrict = 1
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/molly-guard/rc
+    content: |
+      # molly-guard settings
+      #
+      # ALWAYS_QUERY_HOSTNAME
+      # when set, causes the 30-query-hostname script to always ask for the
+      # hostname, even if no SSH session was detected.
+      ALWAYS_QUERY_HOSTNAME=true
+
+      # USE_FQDN
+      # when set, causes the 30-query-hostname script to ask for the fully-qualified
+      # hostname, rather than the short name
+      #USE_FQDN=true
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/default/aide
+    content: |
+      MAILSUBJ="Daily AIDE report for ${hostname}"
+      MAILTO=root
+      QUIETREPORTS=yes
+      COMMAND=update
+      COPYNEWDB=no
+      TRUNCATEDETAILS=no
+      FILTERUPDATES=no
+      FILTERINSTALLATIONS=no
+      LINES=1000
+      NOISE=""
+      AIDEARGS=""
+      CRONEXITHOOK=""
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/vim/vimrc.local
+    content: |
+      set autowrite
+      set shiftwidth=3
+      set softtabstop=3
+      set ttyfast
+      set title
+      set ignorecase
+      set smartcase
+      syntax on
+      set number
+      set cursorline
+      colorscheme desert
+      autocmd FileType yaml setlocal et ts=2 ai sw=2 nu sts=0
+
+      if has("unix")
+         if !isdirectory(expand("~/.backup"))
+            !mkdir ~/.backup
+         endif
+         if !isdirectory(expand("~/.backup/swap"))
+            !mkdir -p ~/.backup/swap
+         endif
+      endif
+      set backup
+      set backupskip=/tmp/*,~/tmp/*,$TMPDIR/*,$TMP/*,$TEMP/*,~/.backup/*
+      set backupdir=~/.backup/
+      set backupext=.bak
+      set directory=~/.backup/swap/
+
+      if expand("%:e") == 'txt' || expand("%:e") == 'tex'
+         setlocal textwidth=80
+      endif
+
+      " Yaml file type config
+      autocmd FileType yaml setlocal ts=2 sts=2 sw=2 expandtab
+
+      set foldlevelstart=20
+
+      let g:ale_echo_msg_format = '[%linter%] %s [%severity%]'
+      let g:ale_sign_error = '✘'
+      let g:ale_sign_warning = '⚠'
+      let g:ale_lint_on_text_changed = 'never'
+    append: true
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/zabbix/zabbix_agentd.conf
+    content: |
+      PidFile=/var/run/zabbix/zabbix_agentd.pid
+      LogFile=/var/log/zabbix-agent/zabbix_agentd.log
+      LogFileSize=0
+      DebugLevel=3
+      Server=zabbix.domain.com
+      StartAgents=5
+      ServerActive=zabbix.domain.com
+      Timeout=3
+      #Include=/etc/zabbix/zabbix_agentd.d/
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/audit/rules.d/domain.rules
+    content: |
+      -a exit,always -F arch=b64 -F euid=0 -S execve
+      -a exit,always -F arch=b32 -F euid=0 -S execve
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/pam.d/common-session
+    content: |
+      session  required pam_mkhomedir.so umask=0022 skel=/etc/skel
+    append: True
+    owner: root:root
+    permissions: '0664'
+
+  - path: /etc/pam.d/common-session-noninteractive
+    content: |
+      session  required pam_mkhomedir.so umask=0022 skel=/etc/skel
+    append: True
+    owner: root:root
+    permissions: '0664'
+
+  - path: /etc/etckeeper/etckeeper.conf
+    content: |
+      VCS="git"
+      GIT_COMMIT_OPTIONS=""
+      HG_COMMIT_OPTIONS=""
+      BZR_COMMIT_OPTIONS=""
+      DARCS_COMMIT_OPTIONS="-a"
+      AVOID_SPECIAL_FILE_WARNING=1
+      HIGHLEVEL_PACKAGE_MANAGER=apt
+      LOWLEVEL_PACKAGE_MANAGER=dpkg
+      PUSH_REMOTE=""
+    owner: root:root
+    permissions: '0644'
+
+  - path: /etc/.git/hooks/post-commit
+    content: |
+      #!/bin/sh
+      MAILTO=root
+      git show | mail -s "[etckeeper] commit em ${hostname}" $MAILTO
+    owner: root:root
+    permissions: '0755'
+
+  - path: /etc/.gitignore
+    content: |
+      *.rpm*
+      *.old
+      blkid.tab
+      blkid.tab.old
+      nologin
+      ld.so.cache
+      prelink.cache
+      mtab
+      mtab.fuselock
+      .pwd.lock
+      *.LOCK
+      network/run
+      adjtime
+      lvm/cache
+      lvm/backup
+      lvm/archive
+      X11/xdm/authdir/authfiles/*
+      ntp.conf.dhcp
+      .initctl
+      webmin/fsdump/*.status
+      webmin/webmin/oscache
+      apparmor.d/cache/*
+      invoke-rc.d/*/supervise/*
+      invoke-rc.d/*/log/supervise/*
+      sv/*/supervise/*
+      sv/*/log/supervise/*
+      *.elc
+      *.pyc
+      *.pyo
+      init.d/.depend.*
+      openvpn/openvpn-status.log
+      cups/subscriptions.conf
+      cups/subscriptions.conf.O
+      fake-hwclock.data
+      localtime
+      *~
+      .*.sw?
+      .sw?
+      DEADJOE
+    owner: root:root
+    permissions: '0600'
+
+  - path: /etc/cron.daily/etckeeper
+    content: |
+      #!/bin/bash
+      MAILTO=root
+      # Checking for uncommited changes on /etc
+      cd /etc
+      if [ -x /usr/sbin/etckeeper ]; then
+         ETCKEEPER=/usr/sbin/etckeeper
+      elif [ -x /usr/bin/etckeeper ]; then
+        ETCKEEPER=/usr/bin/etckeeper
+      else
+         echo "etckeeper not found (apt-get install etckeeper)"
+         exit 1
+      fi
+      if $ETCKEEPER unclean; then
+      {
+         git status
+         echo ""
+         echo "Details of the changes:"
+         echo ""
+         git diff
+      } | mail -s "[etckeeper] Alteracoes pendentes em ${hostname}" $MAILTO
+      fi
+      # Cleanup unnecessary files and optimize the local repository
+      git gc --quiet
+    owner: root:root
+    permissions: '0755'
+
+  - path: /etc/etckeeper/post-install.d/10report-installed-packages
+    content: |
+      #!/bin/sh
+      set -e
+      pl="/var/cache/etckeeper/packagelist"
+      NL="
+      "
+      SUBJECT="Mudancas nos pacotes em ${hostname}"
+      MAILTO=root
+      # if there is changes in /etc, then 50vcs-commit takes care
+      if ! etckeeper unclean; then
+          if [ -e $pl.pre-install ]; then
+        diff="$(etckeeper list-installed | diff -U0 $pl.pre-install - | tail -n+4 | egrep '^[-+]')" || true
+        if [ -n "$diff" ]; then
+            message="Alteracoes de pacotes:$NL$diff"
+        else
+            exit 0
+        fi
+          fi
+
+          printf "$message" | mail -s "[etckeeper] $SUBJECT" $MAILTO
+      fi
+    owner: root:root
+    permissions: '0755'
+
+rsyslog:
+  config_dir: /etc/rsyslog.d
+  config_filename: 50-domain-rsyslog.conf
+  invoke-rc.d_reload_command: [invoke-rc.d, rsyslog, restart]
+  remotes:
+    palmeiras: "*.* logserver.intranet.domain.br:514"
+
+ntp:
+  enabled: true
+  ntp_client: ntp
+  config:
+    packages:
+     - ntp
+    invoke-rc.d_name: ntp
+    check_exe: ntpd
+  servers:
+    - ntp.domain.br
+    - ntp.domain.com
+
+bootcmd:
+    - |
+      cat <<EOF >> /etc/network/interfaces
+      allow-hotplug eth1
+
+      iface eth0 inet static
+        address ${ip_main}
+        network ${subnet_ip}
+        netmask 255.255.255.0
+        gateway ${subnet_gw}
+        dns-nameservers ${ns_ip}
+      
+      iface eth1 inet static
+        address ${ip_bckp}
+        network 172.17.0.0
+        netmask 255.255.255.0
+      EOF
+    - invoke-rc.d networking restart
+    - echo ${hostname} >> /etc/mailname
+
+runcmd:
+  - wget -q https://download.bareos.org/bareos/release/19.2/Debian_10/Release.key -O- | apt-key add -
+  - dpkg-reconfigure locales
+  - invoke-rc.d ssh restart
+  - invoke-rc.d zabbix-agent restart
+  - invoke-rc.d rsyslog restart
+  - invoke-rc.d nslcd restart
+  - invoke-rc.d postfix restart
+  - invoke-rc.d  motd restart
+  - update-alternatives --set editor /usr/bin/vim.basic
+  - mkdir /etc/zabbix/zabbix_agentd.d
+  - updatedb
+  - newaliases
+  - debconf-set-selections /tmp/preconfs.seed
+  - pam-auth-update --package
+  - apt-get -y purge portmap nscd nfs-common gcc make cpp ftp laptop-detect rpcbind linux-headers-$(uname -r) isc-dhcp-client isc-dhcp-common apparmor
+  - git config --global user.email root@${hostname}
+  - git config --global user.name "ROOT $(hostname)"
+  - rm -rf /etc/.git && etckeeper init -d /etc && etckeeper commit "Importacao Inicial." -d /etc
+  - echo "deb http://mirror.domain.br/bareos19-buster/ /" > /etc/apt/sources.list.d/bareos.list
+  - apt-get install -y bareos-filedaemon=19.2.7-2
+  - apt-get dist-upgrade -y
+  - aideinit -y -f
+  - apt-get -y purge cloud-init
+  - apt-get -y autoremove
+  - touch /etc/cloud/cloud-init.disabled
+  - echo "root:$(echo ${set_pass} | base64 -d)" | chpasswd
+  - touch /tmp/terraform_go
+
+timezone: "America/Bahia"
+
+final_message: "The system is finally up, after $UPTIME seconds"
+
+#power_state:
+#  delay: "+6"
+#  mode: reboot
+#  message: "The system will be restart. Please Wait!"
+#  timeout: 5
